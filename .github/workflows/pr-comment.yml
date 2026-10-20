@@ -12,6 +12,8 @@ permissions:
 
 jobs:
   comment:
+    # Manual (workflow_dispatch) builds have no PR to comment on.
+    if: github.event.workflow_run.event == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - name: Download Metadata Artifact
