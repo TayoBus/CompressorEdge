@@ -84,6 +84,8 @@ data class CompressorUiState(
     val pendingDeleteRequest: PendingIntent? = null,
     /** One-shot outcome of the last delete-original attempt: true = all deleted, false = some failed/declined, null = none yet. */
     val originalDeleteSucceeded: Boolean? = null,
+    /** Short failure reason for the last delete-original attempt, shown with the failure toast. */
+    val originalDeleteError: String? = null,
     val backgroundCompressionEnabled: Boolean = false,
     val backgroundCompressionPrompted: Boolean = false,
     val customOutputTreeUri: String? = null,

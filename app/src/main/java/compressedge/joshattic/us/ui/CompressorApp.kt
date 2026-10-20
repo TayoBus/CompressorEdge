@@ -177,10 +177,16 @@ fun CompressorApp(viewModel: CompressorViewModel) {
     val deleteOriginalFailedMessage = stringResource(R.string.delete_original_failed)
     LaunchedEffect(state.originalDeleteSucceeded) {
         val succeeded = state.originalDeleteSucceeded ?: return@LaunchedEffect
+        val error = state.originalDeleteError
+        val message = when {
+            succeeded -> deleteOriginalSuccessMessage
+            !error.isNullOrBlank() -> "$deleteOriginalFailedMessage: $error"
+            else -> deleteOriginalFailedMessage
+        }
         Toast.makeText(
             context,
-            if (succeeded) deleteOriginalSuccessMessage else deleteOriginalFailedMessage,
-            Toast.LENGTH_SHORT
+            message,
+            if (!succeeded && !error.isNullOrBlank()) Toast.LENGTH_LONG else Toast.LENGTH_SHORT
         ).show()
         viewModel.clearOriginalDeleteOutcome()
     }

@@ -3,6 +3,7 @@ package compressedge.joshattic.us.viewmodel
 import android.app.Application
 import android.app.PendingIntent
 import android.app.RecoverableSecurityException
+import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
@@ -1155,6 +1156,7 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
         val needsConsent = mutableListOf<Uri>()
         var recoverableIntent: PendingIntent? = null
         var deletedAny = false
+        var lastError: String? = null
 
         for (uri in originals) {
             try {
@@ -1165,6 +1167,7 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
                 }
             } catch (e: SecurityException) {
                 needsConsent.add(uri)
+                lastError = e.message ?: e.javaClass.simpleName
                 // RecoverableSecurityException only exists on Android 10+;
                 // the SDK check short-circuits before the class is touched.
                 if (recoverableIntent == null &&
@@ -1175,6 +1178,7 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
                 }
             } catch (e: Exception) {
                 needsConsent.add(uri)
+                lastError = e.message ?: e.javaClass.simpleName
             }
         }
 
@@ -1183,21 +1187,45 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
             return
         }
 
-        val consentIntent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+        // MediaStore.createDeleteRequest only accepts MediaStore item URIs.
+        // Photo-picker URIs (content://media/picker/...) are rejected, so map
+        // them back to the underlying MediaStore video URI via their media id.
+        val consentUris = needsConsent.map { toMediaStoreVideoUri(it) ?: it }.distinct()
+
+        var consentIntent: PendingIntent? = null
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             try {
-                MediaStore.createDeleteRequest(resolver, needsConsent)
+                consentIntent = MediaStore.createDeleteRequest(resolver, consentUris)
             } catch (e: Exception) {
-                recoverableIntent
+                lastError = e.message ?: e.javaClass.simpleName
             }
-        } else {
-            recoverableIntent
+        }
+        if (consentIntent == null) {
+            consentIntent = recoverableIntent
         }
 
         if (consentIntent != null) {
             _uiState.update { it.copy(pendingDeleteRequest = consentIntent) }
         } else {
-            _uiState.update { it.copy(originalDeleteSucceeded = false) }
+            _uiState.update { it.copy(originalDeleteSucceeded = false, originalDeleteError = lastError) }
         }
+    }
+
+    /**
+     * Maps a media URI to the MediaStore video item URI for the same item, or
+     * null when the URI is not backed by MediaStore (e.g. a cloud-provider URI,
+     * whose items this app cannot delete). Picker URIs keep the MediaStore id
+     * as their last path segment, so it can be re-attached to the video
+     * collection URI.
+     */
+    private fun toMediaStoreVideoUri(uri: Uri): Uri? {
+        if (uri.authority != MediaStore.AUTHORITY) return null
+        if (uri.pathSegments.contains("video")) {
+            // Already a MediaStore video item URI.
+            return uri
+        }
+        val id = uri.lastPathSegment?.filter { it.isDigit() }?.toLongOrNull() ?: return null
+        return ContentUris.withAppendedId(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, id)
     }
 
     fun clearPendingDeleteRequest() {
@@ -1209,7 +1237,7 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     fun clearOriginalDeleteOutcome() {
-        _uiState.update { it.copy(originalDeleteSucceeded = null) }
+        _uiState.update { it.copy(originalDeleteSucceeded = null, originalDeleteError = null) }
     }
 
     fun toggleBackgroundCompression() {
