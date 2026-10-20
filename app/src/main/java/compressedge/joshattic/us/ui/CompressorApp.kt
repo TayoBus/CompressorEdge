@@ -166,8 +166,9 @@ fun CompressorApp(viewModel: CompressorViewModel) {
         } else {
             androidx.core.content.ContextCompat.checkSelfPermission(context, Manifest.permission.READ_EXTERNAL_STORAGE) == granted
         }
+        // String literal: the Manifest constant only exists in API 34+ SDKs.
         val visualSelectedGranted = Build.VERSION.SDK_INT >= 34 &&
-            androidx.core.content.ContextCompat.checkSelfPermission(context, Manifest.permission.READ_MEDIA_VISUAL_SELECTED) == granted
+            androidx.core.content.ContextCompat.checkSelfPermission(context, "android.permission.READ_MEDIA_VISUAL_SELECTED") == granted
         return readGranted || visualSelectedGranted
     }
 
