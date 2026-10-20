@@ -62,6 +62,7 @@ import compressedge.joshattic.us.ui.screens.CompressingScreen
 import compressedge.joshattic.us.ui.screens.ConfigScreen
 import compressedge.joshattic.us.ui.screens.EmptyScreen
 import compressedge.joshattic.us.ui.screens.ResultScreen
+import compressedge.joshattic.us.ui.screens.VideoPickerScreen
 import compressedge.joshattic.us.ui.screens.settings.AboutScreen
 import compressedge.joshattic.us.ui.screens.settings.DisplaySettingsScreen
 import compressedge.joshattic.us.ui.screens.settings.SettingsScreen
@@ -82,6 +83,7 @@ fun CompressorApp(viewModel: CompressorViewModel) {
     val window = (context as? ComponentActivity)?.window
 
     var forceShowResult by remember { mutableStateOf(false) }
+    var showVideoPicker by remember { mutableStateOf(false) }
     var currentSettingsDestination by remember { mutableStateOf<SettingsDestination?>(null) }
     
     // Reset forceShowResult when we leave the result screen
@@ -102,7 +104,7 @@ fun CompressorApp(viewModel: CompressorViewModel) {
     }
 
     val isSettingsOpen = currentSettingsDestination != null
-    val canHandleBack = isSettingsOpen || state.selectedUri != null
+    val canHandleBack = showVideoPicker || isSettingsOpen || state.selectedUri != null
 
     // Predictive back gesture progress (0f..1f) for in-app navigation previews.
     var backGestureProgress by remember { mutableFloatStateOf(0f) }
@@ -115,7 +117,9 @@ fun CompressorApp(viewModel: CompressorViewModel) {
     )
 
     fun performBackNavigation() {
-        if (isSettingsOpen) {
+        if (showVideoPicker) {
+            showVideoPicker = false
+        } else if (isSettingsOpen) {
             if (currentSettingsDestination == SettingsDestination.MAIN) {
                 currentSettingsDestination = null
             } else {
@@ -150,6 +154,42 @@ fun CompressorApp(viewModel: CompressorViewModel) {
     val pickMedia = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia()) { uris ->
         if (uris.isNotEmpty()) {
             viewModel.updateSelectedUris(context, uris)
+        }
+    }
+
+    // Built-in video picker (MediaStore) needs library read access; when it
+    // is not granted we fall back to the system photo picker above.
+    fun hasVideoLibraryAccess(): Boolean {
+        val granted = android.content.pm.PackageManager.PERMISSION_GRANTED
+        val readGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            androidx.core.content.ContextCompat.checkSelfPermission(context, Manifest.permission.READ_MEDIA_VIDEO) == granted
+        } else {
+            androidx.core.content.ContextCompat.checkSelfPermission(context, Manifest.permission.READ_EXTERNAL_STORAGE) == granted
+        }
+        // String literal: the Manifest constant only exists in API 34+ SDKs.
+        val visualSelectedGranted = Build.VERSION.SDK_INT >= 34 &&
+            androidx.core.content.ContextCompat.checkSelfPermission(context, "android.permission.READ_MEDIA_VISUAL_SELECTED") == granted
+        return readGranted || visualSelectedGranted
+    }
+
+    val videoPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted || hasVideoLibraryAccess()) {
+            showVideoPicker = true
+        } else {
+            pickMedia.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly))
+        }
+    }
+
+    fun openVideoPicker() {
+        if (hasVideoLibraryAccess()) {
+            showVideoPicker = true
+        } else {
+            val permission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                Manifest.permission.READ_MEDIA_VIDEO
+            } else {
+                Manifest.permission.READ_EXTERNAL_STORAGE
+            }
+            videoPermissionLauncher.launch(permission)
         }
     }
 
@@ -301,6 +341,21 @@ fun CompressorApp(viewModel: CompressorViewModel) {
                 }
             }
     ) {
+        if (showVideoPicker) {
+            VideoPickerScreen(
+                onConfirm = { uris ->
+                    showVideoPicker = false
+                    if (uris.isNotEmpty()) {
+                        viewModel.updateSelectedUris(context, uris)
+                    }
+                },
+                onCancel = { showVideoPicker = false },
+                onUseSystemPicker = {
+                    showVideoPicker = false
+                    pickMedia.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly))
+                }
+            )
+        } else {
         AnimatedContent(
             targetState = when {
                 state.isCompressing -> "compressing"
@@ -448,7 +503,7 @@ fun CompressorApp(viewModel: CompressorViewModel) {
                                     0 -> EmptyScreen(
                                         totalSaved = state.formattedTotalSaved,
                                         showStorageSaved = state.showStorageSaved,
-                                        onPick = { pickMedia.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)) }
+                                        onPick = { openVideoPicker() }
                                     )
                                     2 -> {
                                         if (state.error != null) {
@@ -500,6 +555,7 @@ fun CompressorApp(viewModel: CompressorViewModel) {
                     }
                 }
             }
+        }
         }
     }
 
