@@ -322,6 +322,29 @@ fun CompressorApp(viewModel: CompressorViewModel) {
         }
     }
 
+    // Hide already-compressed outputs in the built-in picker: the folders
+    // come from the app settings (gallery path + the custom output folder
+    // from Settings > Output location), never a hardcoded name.
+    val pickerExcludedPaths = remember(state.customOutputTreeUri) {
+        buildSet {
+            add(CompressorViewModel.GALLERY_OUTPUT_RELATIVE_PATH)
+            state.customOutputTreeUri?.takeIf { it.isNotBlank() }?.let { uriString ->
+                try {
+                    val docId = android.provider.DocumentsContract.getTreeDocumentId(Uri.parse(uriString))
+                    val path = docId.substringAfter(':', missingDelimiterValue = "").trim('/')
+                    if (path.isNotBlank()) add(path)
+                } catch (e: Exception) {
+                    // Unparseable tree URI: the folder-name fallback below still applies.
+                }
+            }
+        }
+    }
+    val pickerExcludedNames = remember(state.customOutputFolderName) {
+        buildSet {
+            state.customOutputFolderName?.takeIf { it.isNotBlank() }?.let { add(it) }
+        }
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -343,6 +366,8 @@ fun CompressorApp(viewModel: CompressorViewModel) {
     ) {
         if (showVideoPicker) {
             VideoPickerScreen(
+                excludedRelativePaths = pickerExcludedPaths,
+                excludedFolderNames = pickerExcludedNames,
                 onConfirm = { uris ->
                     showVideoPicker = false
                     if (uris.isNotEmpty()) {

@@ -78,6 +78,9 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     companion object {
+        /** Where gallery saves land; single source for saving and for the video picker's exclusion. */
+        val GALLERY_OUTPUT_RELATIVE_PATH: String = Environment.DIRECTORY_MOVIES + "/Compressor Edge"
+
         private const val PREF_CUSTOM_OUTPUT_TREE_URI = "custom_output_tree_uri"
         private const val PREF_CUSTOM_OUTPUT_FOLDER_NAME = "custom_output_folder_name"
         private const val PREF_SAVED_VERSION_CODE = "saved_app_version_code"
@@ -2298,7 +2301,7 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
 
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                             put(MediaStore.Video.Media.IS_PENDING, 1)
-                            put(MediaStore.Video.Media.RELATIVE_PATH, Environment.DIRECTORY_MOVIES + "/Compressor Edge")
+                            put(MediaStore.Video.Media.RELATIVE_PATH, GALLERY_OUTPUT_RELATIVE_PATH)
                         }
                     }
 

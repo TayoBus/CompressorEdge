@@ -66,14 +66,16 @@ import kotlinx.coroutines.withContext
 
 /**
  * Built-in video picker backed by MediaStore: sortable, multi-select, and
- * already-compressed outputs (the "Compressor Edge" folder) are hidden by
- * the query in [VideoLibrary].
+ * already-compressed outputs are hidden by the query in [VideoLibrary]
+ * using the output folders from the app settings.
  */
 @Composable
 fun VideoPickerScreen(
     onConfirm: (List<Uri>) -> Unit,
     onCancel: () -> Unit,
-    onUseSystemPicker: () -> Unit
+    onUseSystemPicker: () -> Unit,
+    excludedRelativePaths: Set<String> = emptySet(),
+    excludedFolderNames: Set<String> = emptySet()
 ) {
     val context = LocalContext.current
     val haptics = LocalHapticFeedback.current
@@ -84,9 +86,11 @@ fun VideoPickerScreen(
     // Ids in tap order; the number badge on each thumbnail shows this order.
     var selectedIds by remember { mutableStateOf<List<Long>>(emptyList()) }
 
-    LaunchedEffect(sort) {
+    LaunchedEffect(sort, excludedRelativePaths, excludedFolderNames) {
         isLoading = true
-        items = withContext(Dispatchers.IO) { VideoLibrary.loadVideos(context, sort) }
+        items = withContext(Dispatchers.IO) {
+            VideoLibrary.loadVideos(context, sort, excludedRelativePaths, excludedFolderNames)
+        }
         isLoading = false
     }
 

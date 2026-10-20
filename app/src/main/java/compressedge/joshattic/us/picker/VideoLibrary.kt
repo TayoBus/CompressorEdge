@@ -33,17 +33,23 @@ enum class VideoSort(val sortOrder: String) {
 /**
  * Loads the device video library straight from MediaStore.
  *
- * Videos already produced by this app are excluded: the default gallery
- * output lives in a folder named "Compressor Edge" (see saveToGallery),
- * so anything whose relative path contains that folder name is skipped.
+ * Videos already produced by this app are excluded. Which folders count as
+ * output folders comes from the app's settings, not a hardcoded name: the
+ * caller passes the relative path(s) of the configured output location
+ * (the gallery path and/or the custom SAF folder from Settings > Output
+ * location) plus folder-name fallbacks for volumes whose relative paths
+ * do not line up with the tree URI.
  * On pre-Android 10 devices RELATIVE_PATH does not exist, so the legacy
  * DATA column is filtered instead.
  */
 object VideoLibrary {
 
-    private const val OUTPUT_FOLDER_NAME = "Compressor Edge"
-
-    fun loadVideos(context: Context, sort: VideoSort): List<VideoLibraryItem> {
+    fun loadVideos(
+        context: Context,
+        sort: VideoSort,
+        excludedRelativePaths: Set<String> = emptySet(),
+        excludedFolderNames: Set<String> = emptySet()
+    ): List<VideoLibraryItem> {
         val resolver = context.contentResolver
         val collection = MediaStore.Video.Media.EXTERNAL_CONTENT_URI
 
@@ -56,17 +62,45 @@ object VideoLibrary {
             MediaStore.Video.Media.WIDTH,
             MediaStore.Video.Media.HEIGHT
         )
-        val selection: String
-        val selectionArgs: Array<String>
+        val conditions = mutableListOf<String>()
+        val args = mutableListOf<String>()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             projection.add(MediaStore.Video.Media.RELATIVE_PATH)
-            selection = MediaStore.Video.Media.RELATIVE_PATH + " NOT LIKE ?"
-            selectionArgs = arrayOf("%$OUTPUT_FOLDER_NAME%")
+            val rel = MediaStore.Video.Media.RELATIVE_PATH
+            for (path in excludedRelativePaths) {
+                val clean = path.trim('/')
+                if (clean.isBlank()) continue
+                conditions.add("NOT ($rel = ? OR $rel LIKE ? OR $rel LIKE ?)")
+                args.add(clean)
+                args.add("$clean/")
+                args.add("$clean/%")
+            }
+            for (name in excludedFolderNames) {
+                val clean = name.trim('/')
+                if (clean.isBlank()) continue
+                conditions.add("NOT ($rel = ? OR $rel LIKE ? OR $rel LIKE ?)")
+                args.add(clean)
+                args.add("%/$clean")
+                args.add("%/$clean/%")
+            }
         } else {
             @Suppress("DEPRECATION")
-            selection = MediaStore.MediaColumns.DATA + " NOT LIKE ?"
-            selectionArgs = arrayOf("%/$OUTPUT_FOLDER_NAME/%")
+            val data = MediaStore.MediaColumns.DATA
+            for (path in excludedRelativePaths) {
+                val clean = path.trim('/')
+                if (clean.isBlank()) continue
+                conditions.add("$data NOT LIKE ?")
+                args.add("%/$clean/%")
+            }
+            for (name in excludedFolderNames) {
+                val clean = name.trim('/')
+                if (clean.isBlank()) continue
+                conditions.add("$data NOT LIKE ?")
+                args.add("%/$clean/%")
+            }
         }
+        val selection = conditions.joinToString(" AND ").ifBlank { null }
+        val selectionArgs = if (args.isEmpty()) null else args.toTypedArray()
 
         val items = mutableListOf<VideoLibraryItem>()
         resolver.query(collection, projection.toTypedArray(), selection, selectionArgs, sort.sortOrder)?.use { cursor ->
