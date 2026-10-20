@@ -93,6 +93,7 @@ fun DisplaySettingsScreen(
     state: CompressorUiState,
     onBack: () -> Unit,
     onToggleAutoSaveToPhotos: () -> Unit,
+    onToggleDeleteOriginalAfterSave: () -> Unit = {},
     onToggleBackgroundCompression: () -> Unit,
     onChangeOutputLocation: () -> Unit,
     onResetOutputLocation: () -> Unit,
@@ -223,6 +224,47 @@ fun DisplaySettingsScreen(
                                 color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
                             )
                         }
+
+                        // Delete original after saving
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    haptics.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                                    onToggleDeleteOriginalAfterSave()
+                                }
+                                .padding(horizontal = 20.dp, vertical = 18.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = stringResource(R.string.delete_original_after_save_title),
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = stringResource(R.string.delete_original_after_save_subtitle),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(16.dp))
+                            Switch(
+                                checked = state.deleteOriginalAfterSave,
+                                onCheckedChange = {
+                                    haptics.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                                    onToggleDeleteOriginalAfterSave()
+                                }
+                            )
+                        }
+
+                        HorizontalDivider(
+                            modifier = Modifier.padding(horizontal = 20.dp),
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+                        )
 
                         // Background compression
                         Row(

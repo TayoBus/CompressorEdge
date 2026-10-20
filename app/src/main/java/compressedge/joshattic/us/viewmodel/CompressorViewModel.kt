@@ -1,6 +1,8 @@
 package compressedge.joshattic.us.viewmodel
 
 import android.app.Application
+import android.app.PendingIntent
+import android.app.RecoverableSecurityException
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
@@ -93,6 +95,7 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
         val showTargetSizePreset = prefs.getBoolean("show_target_size_preset", true)
         val autoSaveSupported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
         val autoSaveToPhotos = autoSaveSupported && prefs.getBoolean("auto_save_photos", true)
+        val deleteOriginalAfterSave = prefs.getBoolean("delete_original_after_save", false)
         val customOutputTreeUri = prefs.getString(PREF_CUSTOM_OUTPUT_TREE_URI, null)
         val customOutputFolderName = prefs.getString(PREF_CUSTOM_OUTPUT_FOLDER_NAME, null)
         val highConfig = loadQualityPresetConfig("preset_high", QualityPresetConfig(resolutionShortSide = 0, targetFps = 0, sizeRatio = 0.7f, audioBitrate = 320_000))
@@ -125,6 +128,7 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
             showStorageSaved = showStorageSaved,
             showTargetSizePreset = showTargetSizePreset,
             autoSaveToPhotos = autoSaveToPhotos,
+            deleteOriginalAfterSave = deleteOriginalAfterSave,
             backgroundCompressionEnabled = backgroundCompressionEnabled,
             backgroundCompressionPrompted = backgroundCompressionPrompted,
             customOutputTreeUri = customOutputTreeUri,
@@ -1122,6 +1126,92 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
+    fun toggleDeleteOriginalAfterSave() {
+        _uiState.update {
+            val newValue = !it.deleteOriginalAfterSave
+            prefs.edit { putBoolean("delete_original_after_save", newValue) }
+            it.copy(deleteOriginalAfterSave = newValue)
+        }
+    }
+
+    /**
+     * Deletes the source video(s) after a successful save, when the user enabled
+     * "Delete original after saving". Runs on the caller's (IO) thread.
+     *
+     * Media this app does not own cannot be deleted directly: those URIs are
+     * collected and handed to the system delete-consent dialog via
+     * [CompressorUiState.pendingDeleteRequest] (MediaStore.createDeleteRequest
+     * on Android 11+, the RecoverableSecurityException action on Android 10).
+     * On older versions without a consent path, undeletable items are reported
+     * as failed and left untouched.
+     */
+    private fun maybeDeleteOriginalsAfterSave(context: Context) {
+        val state = _uiState.value
+        if (!state.deleteOriginalAfterSave) return
+        val originals = if (state.isBatchMode) state.queue.map { it.uri } else listOfNotNull(state.selectedUri)
+        if (originals.isEmpty()) return
+
+        val resolver = context.contentResolver
+        val needsConsent = mutableListOf<Uri>()
+        var recoverableIntent: PendingIntent? = null
+        var deletedAny = false
+
+        for (uri in originals) {
+            try {
+                if (resolver.delete(uri, null, null) > 0) {
+                    deletedAny = true
+                } else {
+                    needsConsent.add(uri)
+                }
+            } catch (e: SecurityException) {
+                needsConsent.add(uri)
+                // RecoverableSecurityException only exists on Android 10+;
+                // the SDK check short-circuits before the class is touched.
+                if (recoverableIntent == null &&
+                    Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
+                    e is RecoverableSecurityException
+                ) {
+                    recoverableIntent = e.userAction.actionIntent
+                }
+            } catch (e: Exception) {
+                needsConsent.add(uri)
+            }
+        }
+
+        if (needsConsent.isEmpty()) {
+            _uiState.update { it.copy(originalDeleteSucceeded = deletedAny) }
+            return
+        }
+
+        val consentIntent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            try {
+                MediaStore.createDeleteRequest(resolver, needsConsent)
+            } catch (e: Exception) {
+                recoverableIntent
+            }
+        } else {
+            recoverableIntent
+        }
+
+        if (consentIntent != null) {
+            _uiState.update { it.copy(pendingDeleteRequest = consentIntent) }
+        } else {
+            _uiState.update { it.copy(originalDeleteSucceeded = false) }
+        }
+    }
+
+    fun clearPendingDeleteRequest() {
+        _uiState.update { it.copy(pendingDeleteRequest = null) }
+    }
+
+    fun onDeleteConsentResult(granted: Boolean) {
+        _uiState.update { it.copy(originalDeleteSucceeded = granted) }
+    }
+
+    fun clearOriginalDeleteOutcome() {
+        _uiState.update { it.copy(originalDeleteSucceeded = null) }
+    }
+
     fun toggleBackgroundCompression() {
         _uiState.update {
             val newValue = !it.backgroundCompressionEnabled
@@ -1372,6 +1462,7 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
                 showStorageSaved = current.showStorageSaved,
                 showTargetSizePreset = current.showTargetSizePreset,
                 autoSaveToPhotos = current.autoSaveToPhotos,
+                deleteOriginalAfterSave = current.deleteOriginalAfterSave,
                 backgroundCompressionEnabled = current.backgroundCompressionEnabled,
                 backgroundCompressionPrompted = current.backgroundCompressionPrompted,
                 customOutputTreeUri = current.customOutputTreeUri,
@@ -2096,6 +2187,7 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
                     }
                 }
                  _uiState.update { it.copy(saveSuccess = true) }
+                maybeDeleteOriginalsAfterSave(context)
             } catch (e: Exception) {
                 e.printStackTrace()
                 _uiState.update { it.copy(error = getApplication<Application>().getString(R.string.error_save_failed, e.message)) }
@@ -2140,6 +2232,7 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
                 }
 
                 _uiState.update { it.copy(saveSuccess = true) }
+                maybeDeleteOriginalsAfterSave(context)
             } catch (e: Exception) {
                 e.printStackTrace()
                 _uiState.update {
@@ -2206,6 +2299,7 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
                 
                 if (anySaved) {
                     _uiState.update { it.copy(saveSuccess = true) }
+                    maybeDeleteOriginalsAfterSave(context)
                 } else {
                     _uiState.update { it.copy(error = getApplication<Application>().getString(R.string.error_gallery_entry)) }
                 }

@@ -153,6 +153,38 @@ fun CompressorApp(viewModel: CompressorViewModel) {
         }
     }
 
+    // System consent dialog for deleting originals the app does not own
+    // (e.g. videos picked with the photo picker, which grants read access only).
+    val deleteConsentLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult()
+    ) { result ->
+        viewModel.onDeleteConsentResult(result.resultCode == android.app.Activity.RESULT_OK)
+    }
+
+    LaunchedEffect(state.pendingDeleteRequest) {
+        val request = state.pendingDeleteRequest ?: return@LaunchedEffect
+        viewModel.clearPendingDeleteRequest()
+        try {
+            deleteConsentLauncher.launch(
+                androidx.activity.result.IntentSenderRequest.Builder(request.intentSender).build()
+            )
+        } catch (e: Exception) {
+            viewModel.onDeleteConsentResult(false)
+        }
+    }
+
+    val deleteOriginalSuccessMessage = stringResource(R.string.delete_original_success)
+    val deleteOriginalFailedMessage = stringResource(R.string.delete_original_failed)
+    LaunchedEffect(state.originalDeleteSucceeded) {
+        val succeeded = state.originalDeleteSucceeded ?: return@LaunchedEffect
+        Toast.makeText(
+            context,
+            if (succeeded) deleteOriginalSuccessMessage else deleteOriginalFailedMessage,
+            Toast.LENGTH_SHORT
+        ).show()
+        viewModel.clearOriginalDeleteOutcome()
+    }
+
     val createDocumentLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("video/mp4")) { uri ->
         if (uri != null) {
             viewModel.saveToUri(context, uri)
@@ -315,6 +347,7 @@ fun CompressorApp(viewModel: CompressorViewModel) {
                                 state = state,
                                 onBack = { currentSettingsDestination = SettingsDestination.MAIN },
                                 onToggleAutoSaveToPhotos = { viewModel.toggleAutoSaveToPhotos() },
+                                onToggleDeleteOriginalAfterSave = { viewModel.toggleDeleteOriginalAfterSave() },
                                 onToggleBackgroundCompression = { viewModel.toggleBackgroundCompression() },
                                 onChangeOutputLocation = {
                                     val initial = state.customOutputTreeUri?.let { Uri.parse(it) }

@@ -1,5 +1,6 @@
 package compressedge.joshattic.us.model
 
+import android.app.PendingIntent
 import android.net.Uri
 import androidx.media3.common.MimeTypes
 import compressedge.joshattic.us.BuildConfig
@@ -77,6 +78,12 @@ data class CompressorUiState(
     val showTargetSizePreset: Boolean = true,
     /** Only meaningful on Android 10+; forced off on older versions. */
     val autoSaveToPhotos: Boolean = false,
+    /** When true, source video(s) are deleted after the compressed copy is saved successfully. */
+    val deleteOriginalAfterSave: Boolean = false,
+    /** System delete-consent request the UI must launch, set when a direct delete is not permitted. */
+    val pendingDeleteRequest: PendingIntent? = null,
+    /** One-shot outcome of the last delete-original attempt: true = all deleted, false = some failed/declined, null = none yet. */
+    val originalDeleteSucceeded: Boolean? = null,
     val backgroundCompressionEnabled: Boolean = false,
     val backgroundCompressionPrompted: Boolean = false,
     val customOutputTreeUri: String? = null,
