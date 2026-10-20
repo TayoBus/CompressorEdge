@@ -47,6 +47,8 @@ fun rememberSearchableSettings(
 
     val autoSavePhotosTitle = stringResource(R.string.auto_save_photos_title)
     val autoSavePhotosSubtitle = stringResource(R.string.auto_save_photos_subtitle)
+    val deleteOriginalAfterSaveTitle = stringResource(R.string.delete_original_after_save_title)
+    val deleteOriginalAfterSaveSubtitle = stringResource(R.string.delete_original_after_save_subtitle)
     val outputLocationTitle = stringResource(R.string.output_location_title)
     val outputLocationSubtitle = stringResource(R.string.output_location_subtitle)
     val outputLocationResetTitle = stringResource(R.string.output_location_reset_title)
@@ -145,6 +147,7 @@ fun rememberSearchableSettings(
 
         // 2. Display / General
         settings.add(SearchableSetting(autoSavePhotosTitle, autoSavePhotosSubtitle, displayTitle, "display", Icons.Default.Tune, onNavigateToDisplay))
+        settings.add(SearchableSetting(deleteOriginalAfterSaveTitle, deleteOriginalAfterSaveSubtitle, displayTitle, "display", Icons.Default.Tune, onNavigateToDisplay))
         settings.add(SearchableSetting(outputLocationTitle, outputLocationSubtitle, displayTitle, "display", Icons.Default.Tune, onNavigateToDisplay))
         settings.add(SearchableSetting(outputLocationResetTitle, outputLocationResetSubtitle, displayTitle, "display", Icons.Default.Tune, onNavigateToDisplay))
         settings.add(SearchableSetting(showBitrate, showBitrateSubtitle, displayTitle, "display", Icons.Default.Tune, onNavigateToDisplay))

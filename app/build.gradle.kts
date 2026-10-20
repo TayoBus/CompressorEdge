@@ -20,7 +20,23 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        // Pinned debug-only keystore committed to the repo, so every CI and
+        // local debug build shares one signature and can update in place.
+        // Credentials are the standard public Android debug ones; release
+        // signing is separate and unaffected.
+        create("pinnedDebug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("pinnedDebug")
+        }
         release {
             isMinifyEnabled = false
             proguardFiles(

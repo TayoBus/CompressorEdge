@@ -185,6 +185,8 @@
     <string name="header_display_options">Display options</string>
     <string name="auto_save_photos_title">Automatically save</string>
     <string name="auto_save_photos_subtitle">Automatically save compressed videos after compression</string>
+    <string name="delete_original_after_save_title">Delete original after saving</string>
+    <string name="delete_original_after_save_subtitle">Delete the source video once the compressed copy has been saved. Android may ask you to confirm the deletion.</string>
     <string name="output_location_title">Save location</string>
     <string name="output_location_default">Photos (Movies/Compressor Edge)</string>
     <string name="output_location_subtitle">Where compressed videos are saved by default</string>
