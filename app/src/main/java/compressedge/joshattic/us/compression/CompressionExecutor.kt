@@ -241,6 +241,58 @@ object CompressionExecutor {
         return transformer
     }
 
+    /**
+     * Compact description of the input file's tracks (codec, size, rotation,
+     * frame rate, color, audio format) for error reports. Best-effort: any
+     * failure just notes itself in the output.
+     */
+    fun probeInput(context: Context, uri: Uri): String {
+        val sb = StringBuilder()
+        try {
+            val extractor = android.media.MediaExtractor()
+            try {
+                extractor.setDataSource(context, uri, null)
+                for (i in 0 until extractor.trackCount) {
+                    val f = extractor.getTrackFormat(i)
+                    val mime = try { f.getString(android.media.MediaFormat.KEY_MIME) } catch (e: Exception) { null } ?: "?"
+                    fun intOrNull(key: String): Int? =
+                        if (f.containsKey(key)) try { f.getInteger(key) } catch (e: Exception) { null } else null
+                    when {
+                        mime.startsWith("video/") -> {
+                            sb.append("Input video track: ").append(mime)
+                            val w = intOrNull(android.media.MediaFormat.KEY_WIDTH)
+                            val h = intOrNull(android.media.MediaFormat.KEY_HEIGHT)
+                            if (w != null && h != null) sb.append(" ").append(w).append("x").append(h)
+                            intOrNull(android.media.MediaFormat.KEY_ROTATION)?.let { sb.append(" rot=").append(it) }
+                            intOrNull(android.media.MediaFormat.KEY_FRAME_RATE)?.let { sb.append(" fps=").append(it) }
+                            val cs = intOrNull(android.media.MediaFormat.KEY_COLOR_STANDARD)
+                            val ct = intOrNull(android.media.MediaFormat.KEY_COLOR_TRANSFER)
+                            val cr = intOrNull(android.media.MediaFormat.KEY_COLOR_RANGE)
+                            if (cs != null || ct != null || cr != null) {
+                                sb.append(" color(std=").append(cs).append(",transfer=").append(ct).append(",range=").append(cr).append(")")
+                            }
+                            intOrNull(android.media.MediaFormat.KEY_BIT_RATE)?.let { sb.append(" bitrate=").append(it) }
+                            sb.append("\n")
+                        }
+                        mime.startsWith("audio/") -> {
+                            sb.append("Input audio track: ").append(mime)
+                            intOrNull(android.media.MediaFormat.KEY_SAMPLE_RATE)?.let { sb.append(" ").append(it).append("Hz") }
+                            intOrNull(android.media.MediaFormat.KEY_CHANNEL_COUNT)?.let { sb.append(" ").append(it).append("ch") }
+                            intOrNull(android.media.MediaFormat.KEY_BIT_RATE)?.let { sb.append(" bitrate=").append(it) }
+                            sb.append("\n")
+                        }
+                    }
+                }
+            } finally {
+                extractor.release()
+            }
+        } catch (e: Exception) {
+            sb.append("Input probe failed: ").append(e.message).append("\n")
+        }
+        if (sb.isEmpty()) sb.append("Input probe: no tracks found\n")
+        return sb.toString().trim()
+    }
+
     /** True when the export died because the muxer watchdog saw no output samples at all (encoder stall). */
     fun isMuxerStall(e: Throwable): Boolean {
         var t: Throwable? = e
@@ -254,12 +306,14 @@ object CompressionExecutor {
     suspend fun executeSuspend(
         context: Context,
         params: Params,
-        onProgress: (androidx.media3.transformer.ProgressHolder, Transformer) -> Unit
+        onProgress: (androidx.media3.transformer.ProgressHolder, Transformer) -> Unit,
+        onStallRetry: (() -> Unit)? = null
     ): Long {
         return try {
             attemptOnce(context, params, onProgress)
         } catch (e: ExportException) {
             if (!isMuxerStall(e)) throw e
+            onStallRetry?.invoke()
             // The encoder accepted the configuration but never produced a
             // sample. Retry once with the opposite bitrate mode, which is a
             // materially different encoder configuration on vendor codecs.

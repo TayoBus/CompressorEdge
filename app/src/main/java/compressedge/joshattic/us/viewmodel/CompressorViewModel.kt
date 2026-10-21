@@ -1676,12 +1676,18 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
                     }
                 )
 
+                var stallRetried = false
                 try {
-                    val finalSize = CompressionExecutor.executeSuspend(context, params) { holder, _ ->
-                        val overallProgress = (index.toFloat() + (holder.progress / 100f)) / itemsToProcess.size.toFloat()
-                        val currentSize = if (outputFile.exists()) outputFile.length() else 0L
-                        _uiState.update { it.copy(progress = overallProgress, currentOutputSize = currentSize) }
-                    }
+                    val finalSize = CompressionExecutor.executeSuspend(
+                        context,
+                        params,
+                        onProgress = { holder, _ ->
+                            val overallProgress = (index.toFloat() + (holder.progress / 100f)) / itemsToProcess.size.toFloat()
+                            val currentSize = if (outputFile.exists()) outputFile.length() else 0L
+                            _uiState.update { it.copy(progress = overallProgress, currentOutputSize = currentSize) }
+                        },
+                        onStallRetry = { stallRetried = true }
+                    )
                     
                     val savedBytes = item.originalSize - finalSize
                     if (savedBytes > 0) totalSavedThisSession += savedBytes
@@ -1695,11 +1701,19 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
                 } catch (e: Exception) {
                     if (e is androidx.media3.transformer.ExportException) {
                         val errorMsg = CompressionExecutor.errorMessage(getApplication<android.app.Application>(), e)
+                        val diagnostics = buildString {
+                            append("Diagnostics:\n")
+                            append(CompressionExecutor.probeInput(context, item.uri)).append("\n")
+                            append("Duration: ").append(item.durationMs / 1000).append("s\n")
+                            append("Output target: ").append(params.outputHeight).append("p, bitrate=").append(params.targetBitrate).append("\n")
+                            append("Progress at failure: ").append((_uiState.value.progress * 100).toInt()).append("%\n")
+                            append("Stall retry attempted: ").append(if (stallRetried) "yes" else "no").append("\n\n")
+                        }
                         _uiState.update {
                             it.copy(
                                 isCompressing = false,
                                 error = errorMsg,
-                                errorLog = e.stackTraceToString()
+                                errorLog = diagnostics + e.stackTraceToString()
                             )
                         }
                     } else if (e !is kotlinx.coroutines.CancellationException) {
