@@ -425,7 +425,7 @@ class BackgroundCompressionService : Service() {
                 if (!isActive || cancelled) break
 
                 try {
-                    val finalSize = CompressionExecutor.executeSuspend(applicationContext, params) { holder, _ ->
+                    val finalSize = CompressionExecutor.executeSuspend(applicationContext, params, onProgress = { holder, _ ->
                         val overallProgress = (index.toFloat() + (holder.progress / 100f)) / batch.size.toFloat()
                         
                         val currentOutputSize = if (File(params.outputPath).exists()) File(params.outputPath).length() else 0L
@@ -436,8 +436,8 @@ class BackgroundCompressionService : Service() {
                             lastProgressPercent = currentPercent
                             updateNotification(currentPercent)
                         }
-                    }
-                    
+                    })
+
                     val uri = Uri.fromFile(File(params.outputPath))
                     lastUri = uri
                     completedUris.add(uri)
