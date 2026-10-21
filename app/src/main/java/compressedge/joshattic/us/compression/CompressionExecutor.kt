@@ -162,7 +162,6 @@ object CompressionExecutor {
             override fun audioNeedsEncoding(): Boolean = primaryEncoderFactory.audioNeedsEncoding()
             override fun videoNeedsEncoding(): Boolean = primaryEncoderFactory.videoNeedsEncoding()
         }
-        }
 
         val audioMimeType = when (params.audioCodec) {
             MimeTypes.AUDIO_OPUS -> MimeTypes.AUDIO_OPUS
