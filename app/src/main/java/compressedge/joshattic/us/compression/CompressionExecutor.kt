@@ -59,7 +59,9 @@ object CompressionExecutor {
         val audioCodec: String,
         val removeAudio: Boolean,
         val audioVolume: Float,
-        val onHdrToneMap: (() -> Unit)? = null
+        val onHdrToneMap: (() -> Unit)? = null,
+        /** Force a video encoder bitrate mode (BITRATE_MODE_CBR / BITRATE_MODE_VBR); null = SoC heuristic. */
+        val bitrateModeOverride: Int? = null
     )
 
     fun execute(
@@ -105,8 +107,13 @@ object CompressionExecutor {
             .build()
 
         val isMediaTek = isMediaTekDeviceOrEncoder(videoMimeType)
-        val primaryEncoderFactory = if (isMediaTek) vbrEncoderFactory else cbrEncoderFactory
-        val fallbackEncoderFactory = if (isMediaTek) cbrEncoderFactory else vbrEncoderFactory
+        val primaryIsVbr = when (params.bitrateModeOverride) {
+            android.media.MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_VBR -> true
+            android.media.MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR -> false
+            else -> isMediaTek
+        }
+        val primaryEncoderFactory = if (primaryIsVbr) vbrEncoderFactory else cbrEncoderFactory
+        val fallbackEncoderFactory = if (primaryIsVbr) cbrEncoderFactory else vbrEncoderFactory
 
         val encoderFactory = object : Codec.EncoderFactory {
             override fun createForAudioEncoding(
@@ -148,6 +155,10 @@ object CompressionExecutor {
 
         val transformerBuilder = Transformer.Builder(context)
             .setLooper(Looper.getMainLooper())
+            // Default is 10s; some chipsets' MediaCodec encoder is slow to
+            // produce its first samples, so give it more room before the
+            // muxer watchdog declares the pipeline stuck.
+            .setMaxDelayBetweenMuxerSamplesMs(30_000)
             .setVideoMimeType(videoMimeType)
             .setAudioMimeType(audioMimeType)
             .apply {
@@ -181,8 +192,13 @@ object CompressionExecutor {
             var width = (params.outputHeight * aspectRatio).toInt()
             var height = params.outputHeight
 
-            if (width % 2 != 0) width -= 1
-            if (height % 2 != 0) height -= 1
+            // Align the computed width down to a multiple of 16 (and the
+            // height to a multiple of 8). Merely being even is not enough
+            // for some vendor HEVC encoders: at sizes like 644x480 they
+            // accept the configuration but then never produce a single
+            // output sample, so the export dies on the muxer watchdog.
+            width = (width / 16) * 16
+            height = (height / 8) * 8
 
             if (width > 0 && height > 0) {
                 effectsList.add(Presentation.createForWidthAndHeight(width, height, Presentation.LAYOUT_SCALE_TO_FIT))
@@ -225,7 +241,41 @@ object CompressionExecutor {
         return transformer
     }
 
+    /** True when the export died because the muxer watchdog saw no output samples at all (encoder stall). */
+    fun isMuxerStall(e: Throwable): Boolean {
+        var t: Throwable? = e
+        while (t != null) {
+            if (t.message?.contains("no output sample written") == true) return true
+            t = t.cause
+        }
+        return false
+    }
+
     suspend fun executeSuspend(
+        context: Context,
+        params: Params,
+        onProgress: (androidx.media3.transformer.ProgressHolder, Transformer) -> Unit
+    ): Long {
+        return try {
+            attemptOnce(context, params, onProgress)
+        } catch (e: ExportException) {
+            if (!isMuxerStall(e)) throw e
+            // The encoder accepted the configuration but never produced a
+            // sample. Retry once with the opposite bitrate mode, which is a
+            // materially different encoder configuration on vendor codecs.
+            try { File(params.outputPath).delete() } catch (_: Exception) {}
+            val cbr = android.media.MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR
+            val vbr = android.media.MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_VBR
+            val retryOverride = when (params.bitrateModeOverride) {
+                vbr -> cbr
+                cbr -> vbr
+                else -> if (isMediaTekDeviceOrEncoder(params.videoMimeType)) cbr else vbr
+            }
+            attemptOnce(context, params.copy(bitrateModeOverride = retryOverride), onProgress)
+        }
+    }
+
+    private suspend fun attemptOnce(
         context: Context,
         params: Params,
         onProgress: (androidx.media3.transformer.ProgressHolder, Transformer) -> Unit
