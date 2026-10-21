@@ -1702,7 +1702,7 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
                     if (e is androidx.media3.transformer.ExportException) {
                         val errorMsg = CompressionExecutor.errorMessage(getApplication<android.app.Application>(), e)
                         val diagnostics = buildString {
-                            append("Diagnostics:\n")
+                            append("Diagnostics v2:\n")
                             append(CompressionExecutor.probeInput(context, item.uri)).append("\n")
                             append("Duration: ").append(item.durationMs / 1000).append("s\n")
                             append("Output target: ").append(params.outputHeight).append("p, bitrate=").append(params.targetBitrate).append("\n")
@@ -1721,7 +1721,7 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
                             it.copy(
                                 isCompressing = false,
                                 error = e.localizedMessage ?: "Unknown Error",
-                                errorLog = e.stackTraceToString()
+                                errorLog = CompressionExecutor.errorDiagnostics(context, item.uri) + "\n" + e.stackTraceToString()
                             )
                         }
                     }

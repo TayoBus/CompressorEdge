@@ -45,6 +45,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import compressedge.joshattic.us.R
+import compressedge.joshattic.us.compression.CompressionExecutor
 import compressedge.joshattic.us.model.CompressorUiState
 import compressedge.joshattic.us.utils.scaleOnPress
 
@@ -69,6 +70,16 @@ fun CompressionFailedScreen(state: CompressorUiState, onBack: () -> Unit, onSave
             sb.append("Error: ${state.error ?: "File larger than original"}\n")
             if (state.errorLog != null) {
                 sb.append("\nStack Trace:\n${state.errorLog}")
+            }
+            // Fallback: if the failure came through a path that did not
+            // attach diagnostics, probe the failing input right here so the
+            // report always describes the source file.
+            if (state.errorLog?.contains("Diagnostics v") != true) {
+                val failingUri = state.selectedUri ?: state.queue.firstOrNull { it.error != null }?.uri ?: state.queue.firstOrNull()?.uri
+                if (failingUri != null) {
+                    sb.append("\n\n")
+                    sb.append(CompressionExecutor.errorDiagnostics(context, failingUri))
+                }
             }
             sb.toString()
         }

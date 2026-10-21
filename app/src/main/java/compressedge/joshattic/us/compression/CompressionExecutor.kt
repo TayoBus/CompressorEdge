@@ -241,6 +241,10 @@ object CompressionExecutor {
         return transformer
     }
 
+    /** Versioned diagnostics header + input probe, prepended to error logs on every failure path. */
+    fun errorDiagnostics(context: Context, uri: Uri): String =
+        "Diagnostics v2:\n" + probeInput(context, uri) + "\n"
+
     /**
      * Compact description of the input file's tracks (codec, size, rotation,
      * frame rate, color, audio format) for error reports. Best-effort: any
@@ -272,6 +276,9 @@ object CompressionExecutor {
                                 sb.append(" color(std=").append(cs).append(",transfer=").append(ct).append(",range=").append(cr).append(")")
                             }
                             intOrNull(android.media.MediaFormat.KEY_BIT_RATE)?.let { sb.append(" bitrate=").append(it) }
+                            if (f.containsKey(android.media.MediaFormat.KEY_DURATION)) {
+                                try { sb.append(" dur=").append(f.getLong(android.media.MediaFormat.KEY_DURATION) / 1_000_000).append("s") } catch (e: Exception) {}
+                            }
                             sb.append("\n")
                         }
                         mime.startsWith("audio/") -> {

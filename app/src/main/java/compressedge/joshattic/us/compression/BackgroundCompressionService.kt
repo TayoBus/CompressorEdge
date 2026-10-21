@@ -448,7 +448,10 @@ class BackgroundCompressionService : Service() {
                         e.localizedMessage ?: getString(R.string.error_unknown)
                     }
                     if (e !is kotlinx.coroutines.CancellationException) {
-                        BackgroundCompressionManager.fail(errorMsg, e.stackTraceToString())
+                        BackgroundCompressionManager.fail(
+                            errorMsg,
+                            CompressionExecutor.errorDiagnostics(applicationContext, params.inputUri) + "\n" + e.stackTraceToString()
+                        )
                         updateNotification(0)
                     }
                     anyErrors = true
