@@ -448,9 +448,12 @@ class BackgroundCompressionService : Service() {
                         e.localizedMessage ?: getString(R.string.error_unknown)
                     }
                     if (e !is kotlinx.coroutines.CancellationException) {
+                        val diag = CompressionExecutor.errorDiagnostics(applicationContext, params.inputUri) +
+                            "Progress at failure: " + maxOf(0, lastProgressPercent) + "%\n" +
+                            "Output target: " + params.outputHeight + "p, bitrate=" + params.targetBitrate + "\n\n"
                         BackgroundCompressionManager.fail(
                             errorMsg,
-                            CompressionExecutor.errorDiagnostics(applicationContext, params.inputUri) + "\n" + e.stackTraceToString()
+                            diag + e.stackTraceToString()
                         )
                         updateNotification(0)
                     }

@@ -61,7 +61,9 @@ object CompressionExecutor {
         val audioVolume: Float,
         val onHdrToneMap: (() -> Unit)? = null,
         /** Force a video encoder bitrate mode (BITRATE_MODE_CBR / BITRATE_MODE_VBR); null = SoC heuristic. */
-        val bitrateModeOverride: Int? = null
+        val bitrateModeOverride: Int? = null,
+        /** Use a plain stock encoder factory: no bitrate-mode forcing, no format rewriting wrapper. */
+        val plainEncoderFactory: Boolean = false
     )
 
     fun execute(
@@ -115,7 +117,20 @@ object CompressionExecutor {
         val primaryEncoderFactory = if (primaryIsVbr) vbrEncoderFactory else cbrEncoderFactory
         val fallbackEncoderFactory = if (primaryIsVbr) cbrEncoderFactory else vbrEncoderFactory
 
-        val encoderFactory = object : Codec.EncoderFactory {
+        val encoderFactory: Codec.EncoderFactory = if (params.plainEncoderFactory) {
+            // Plain stock factory: no bitrate-mode forcing and none of the
+            // format rewriting (frame rate override, color-info nulling)
+            // the wrapper below performs.
+            DefaultEncoderFactory.Builder(context)
+                .setEnableFallback(true)
+                .setRequestedVideoEncoderSettings(
+                    VideoEncoderSettings.Builder().setBitrate(params.targetBitrate).build()
+                )
+                .setRequestedAudioEncoderSettings(
+                    AudioEncoderSettings.Builder().setBitrate(params.audioBitrate).build()
+                )
+                .build()
+        } else object : Codec.EncoderFactory {
             override fun createForAudioEncoding(
                 format: androidx.media3.common.Format,
                 logSessionId: android.media.metrics.LogSessionId?
@@ -146,6 +161,7 @@ object CompressionExecutor {
 
             override fun audioNeedsEncoding(): Boolean = primaryEncoderFactory.audioNeedsEncoding()
             override fun videoNeedsEncoding(): Boolean = primaryEncoderFactory.videoNeedsEncoding()
+        }
         }
 
         val audioMimeType = when (params.audioCodec) {
@@ -243,7 +259,7 @@ object CompressionExecutor {
 
     /** Versioned diagnostics header + input probe, prepended to error logs on every failure path. */
     fun errorDiagnostics(context: Context, uri: Uri): String =
-        "Diagnostics v2:\n" + probeInput(context, uri) + "\n"
+        "Diagnostics v3:\n" + probeInput(context, uri) + "\n"
 
     /**
      * Compact description of the input file's tracks (codec, size, rotation,
@@ -252,6 +268,36 @@ object CompressionExecutor {
      */
     fun probeInput(context: Context, uri: Uri): String {
         val sb = StringBuilder()
+        // File identity + container type, when the provider exposes them.
+        try {
+            context.contentResolver.query(
+                uri,
+                arrayOf(android.provider.OpenableColumns.DISPLAY_NAME, android.provider.OpenableColumns.SIZE),
+                null, null, null
+            )?.use { c ->
+                if (c.moveToFirst()) {
+                    val name = if (c.isNull(0)) null else c.getString(0)
+                    val sizeKb = if (c.isNull(1)) null else c.getLong(1) / 1024
+                    sb.append("File: ").append(name ?: "?")
+                    if (sizeKb != null) sb.append(" (").append(sizeKb).append(" KB)")
+                    sb.append("\n")
+                }
+            }
+        } catch (e: Exception) {
+            // Provider does not expose name/size; the track probe below still applies.
+        }
+        try {
+            val retriever = android.media.MediaMetadataRetriever()
+            try {
+                retriever.setDataSource(context, uri)
+                val container = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_MIMETYPE)
+                if (container != null) sb.append("Container: ").append(container).append("\n")
+            } finally {
+                retriever.release()
+            }
+        } catch (e: Exception) {
+            // Container stays unknown.
+        }
         try {
             val extractor = android.media.MediaExtractor()
             try {
@@ -316,24 +362,38 @@ object CompressionExecutor {
         onProgress: (androidx.media3.transformer.ProgressHolder, Transformer) -> Unit,
         onStallRetry: (() -> Unit)? = null
     ): Long {
-        return try {
-            attemptOnce(context, params, onProgress)
-        } catch (e: ExportException) {
-            if (!isMuxerStall(e)) throw e
-            onStallRetry?.invoke()
-            // The encoder accepted the configuration but never produced a
-            // sample. Retry once with the opposite bitrate mode, which is a
-            // materially different encoder configuration on vendor codecs.
-            try { File(params.outputPath).delete() } catch (_: Exception) {}
-            val cbr = android.media.MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR
-            val vbr = android.media.MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_VBR
-            val retryOverride = when (params.bitrateModeOverride) {
-                vbr -> cbr
-                cbr -> vbr
-                else -> if (isMediaTekDeviceOrEncoder(params.videoMimeType)) cbr else vbr
+        // Stall retry ladder. A muxer-watchdog stall means the pipeline
+        // accepted the configuration but produced nothing, so each retry
+        // changes a materially different part of the encoder setup:
+        //   attempt 2: opposite bitrate mode (CBR <-> VBR)
+        //   attempt 3: plain stock encoder factory (no bitrate-mode
+        //              forcing, no format-rewriting wrapper)
+        var attemptParams = params
+        var lastError: ExportException? = null
+        for (attempt in 1..3) {
+            try {
+                return attemptOnce(context, attemptParams, onProgress)
+            } catch (e: ExportException) {
+                if (!isMuxerStall(e)) throw e
+                lastError = e
+                if (attempt == 3) break
+                onStallRetry?.invoke()
+                try { File(params.outputPath).delete() } catch (_: Exception) {}
+                attemptParams = if (attempt == 1) {
+                    val cbr = android.media.MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR
+                    val vbr = android.media.MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_VBR
+                    val retryOverride = when (attemptParams.bitrateModeOverride) {
+                        vbr -> cbr
+                        cbr -> vbr
+                        else -> if (isMediaTekDeviceOrEncoder(params.videoMimeType)) cbr else vbr
+                    }
+                    attemptParams.copy(bitrateModeOverride = retryOverride)
+                } else {
+                    attemptParams.copy(bitrateModeOverride = null, plainEncoderFactory = true)
+                }
             }
-            attemptOnce(context, params.copy(bitrateModeOverride = retryOverride), onProgress)
         }
+        throw lastError ?: IllegalStateException("Export failed")
     }
 
     private suspend fun attemptOnce(

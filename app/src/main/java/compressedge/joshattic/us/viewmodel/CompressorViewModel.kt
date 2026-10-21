@@ -1676,7 +1676,7 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
                     }
                 )
 
-                var stallRetried = false
+                var stallRetries = 0
                 try {
                     val finalSize = CompressionExecutor.executeSuspend(
                         context,
@@ -1686,7 +1686,7 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
                             val currentSize = if (outputFile.exists()) outputFile.length() else 0L
                             _uiState.update { it.copy(progress = overallProgress, currentOutputSize = currentSize) }
                         },
-                        onStallRetry = { stallRetried = true }
+                        onStallRetry = { stallRetries++ }
                     )
                     
                     val savedBytes = item.originalSize - finalSize
@@ -1702,12 +1702,12 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
                     if (e is androidx.media3.transformer.ExportException) {
                         val errorMsg = CompressionExecutor.errorMessage(getApplication<android.app.Application>(), e)
                         val diagnostics = buildString {
-                            append("Diagnostics v2:\n")
+                            append("Diagnostics v3:\n")
                             append(CompressionExecutor.probeInput(context, item.uri)).append("\n")
                             append("Duration: ").append(item.durationMs / 1000).append("s\n")
                             append("Output target: ").append(params.outputHeight).append("p, bitrate=").append(params.targetBitrate).append("\n")
                             append("Progress at failure: ").append((_uiState.value.progress * 100).toInt()).append("%\n")
-                            append("Stall retry attempted: ").append(if (stallRetried) "yes" else "no").append("\n\n")
+                            append("Stall retries: ").append(stallRetries).append("\n\n")
                         }
                         _uiState.update {
                             it.copy(
